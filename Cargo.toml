@@ -1,0 +1,26 @@
+[package]
+name = "binance_nshft"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
+opt-level = 3
+lto = true
+[dependencies]
+tokio = {version ="1.26.0", features = ["macros","sync","time","rt-multi-thread","signal"]}
+tokio-tungstenite = {version = "0.18.0", features = ["native-tls"]}
+log = {version = "0.4.17", features = ["std", "serde"] }
+reqwest = {version = "0.11.14", features = ["json"] }
+serde = {version = "1.0.152", features = ["derive"] }
+log4rs = "1.2.0"
+url = "2.3.1"
+futures-util = "0.3.26"
+serde_json = "1.0.93"
+chrono = { version = "0.4.23", features = ["serde"] }
+serde_with = { version = "2.2.0", features = ["chrono"] }
+futures = "0.3.26"
+rayon = "1.6.1"
+rust_decimal = { version = "1.28.1", features = ["serde-with-str"] }
+itertools = "0.10.5"
+
