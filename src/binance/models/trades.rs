@@ -46,7 +46,4 @@ impl Trade {
             net_qty,
         ]
     }
-    pub fn feature_names() -> Vec<String> {
-        vec!["timestamp".to_string(), "price".to_string(), "net_qty".to_string()]
-    }
 }

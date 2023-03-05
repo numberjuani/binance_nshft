@@ -2,14 +2,15 @@ use std::sync::Arc;
 
 use log::info;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use rust_decimal::prelude::ToPrimitive;
 use tokio::sync::{Notify, RwLock};
 use xgboost::{parameters, Booster, DMatrix};
 
-use crate::binance::models::{
+use crate::{binance::models::{
     fapi_exchange_info::Symbol,
-    orderbook::{OrderBook, OrderBooksRWL},
+    orderbook::{OrderBooksRWL},
     trades::Trade,
-};
+}, MIN_TRADES_TO_START, MIN_TICKS_FOR_SIGNAL};
 /*
 feature indexes
 0: trade time
@@ -25,7 +26,8 @@ feature indexes
 10: qty_mean
 11: qty_std
 12: mean_bid_asks_ratio
-13:target
+13: total_volume
+14:target
  */
 pub async fn manage_model(
     enough_data_notify: Arc<Notify>,
@@ -43,10 +45,10 @@ pub async fn manage_model(
     trades.sort_by_key(|trade| trade.trade_time);
     //sort the orderbooks by time
     orderbooks.sort_by_key(|orderbook| orderbook.time);
-    let rolling_period = 1000;
+    let rolling_period = MIN_TRADES_TO_START/10;
     let mut feature_vec: Vec<Vec<f32>> = Vec::new();
-    let mut feature_names = vec![Trade::feature_names(), OrderBook::feature_names()].concat();
-    for (i,trade) in trades.iter().enumerate() {
+    //first we merge both vec of structs into a vec of vecs of floats
+    for trade in trades {
         let filtered_orderbooks = orderbooks
             .par_iter()
             .filter(|orderbook| orderbook.time <= trade.trade_time)
@@ -57,10 +59,9 @@ pub async fn manage_model(
             .max_by_key(|orderbook| orderbook.time)
             .clone();
         if matching_book_at_time_of_trade.is_none() {
-            println!("continue");
             continue;
         }
-        let mut row = vec![
+        let row = vec![
             trade.to_feature(),
             matching_book_at_time_of_trade
                 .unwrap()
@@ -71,78 +72,87 @@ pub async fn manage_model(
         .flatten()
         .cloned()
         .collect::<Vec<f32>>();
-        if i > rolling_period {
-            //we can calculate rolling features
-            let price_mean = feature_vec[i - rolling_period..i]
+        feature_vec.push(row);
+    }
+    // now we calculate rolling features on the merged vec
+    for i in rolling_period..feature_vec.len()-1 {
+        let price_mean = feature_vec[i - rolling_period..i]
+            .par_iter()
+            .map(|row| row[1])
+            .sum::<f32>()
+            / rolling_period as f32;
+        let price_std = f32::sqrt(
+            feature_vec[i - rolling_period..i]
                 .par_iter()
                 .map(|row| row[1])
+                .map(|price| (price - price_mean).powi(2))
                 .sum::<f32>()
-                / rolling_period as f32;
-            let price_std = f32::sqrt(
-                feature_vec[i - rolling_period..i]
-                    .par_iter()
-                    .map(|row| row[1])
-                    .map(|price| (price - price_mean).powi(2))
-                    .sum::<f32>()
-                    / rolling_period as f32,
-            );
-            let qty_mean = feature_vec[i - rolling_period..i]
+                / rolling_period as f32,
+        );
+        let qty_mean = feature_vec[i - rolling_period..i]
+            .par_iter()
+            .map(|row| row[2])
+            .sum::<f32>()
+            / rolling_period as f32;
+        let qty_std = f32::sqrt(
+            feature_vec[i - rolling_period..i]
                 .par_iter()
                 .map(|row| row[2])
+                .map(|qty| (qty - qty_mean).powi(2))
                 .sum::<f32>()
-                / rolling_period as f32;
-            let qty_std = f32::sqrt(
-                feature_vec[i - rolling_period..i]
-                    .par_iter()
-                    .map(|row| row[2])
-                    .map(|qty| (qty - qty_mean).powi(2))
-                    .sum::<f32>()
-                    / rolling_period as f32,
-            );
-            let mean_bid_asks_ratio = feature_vec[i - rolling_period..i]
-                .par_iter()
-                .map(|row| row[7])
-                .sum::<f32>()
-                / rolling_period as f32;
-            row.append(&mut vec![
-                price_mean,
-                price_std,
-                qty_mean,
-                qty_std,
-                mean_bid_asks_ratio,
-            ]);
-            feature_names.append(&mut vec![
-                "price_mean".to_string(),
-                "price_std".to_string(),
-                "qty_mean".to_string(),
-                "qty_std".to_string(),
-                "mean_bid_asks_ratio".to_string(),
-            ])
-        }
-        feature_vec.push(row);
+                / rolling_period as f32,
+        );
+        let mean_bid_asks_ratio = feature_vec[i - rolling_period..i]
+            .par_iter()
+            .map(|row| row[7])
+            .sum::<f32>()
+            / rolling_period as f32;
+        let total_volume = feature_vec[i - rolling_period..i]
+            .par_iter()
+            .map(|row| row[2].abs())
+            .sum::<f32>();
+        let rolling_feats = vec![
+            price_mean,
+            price_std,
+            qty_mean,
+            qty_std,
+            mean_bid_asks_ratio,
+            total_volume,
+        ];
+        feature_vec[i].extend(rolling_feats);
     }
     // now we remove the first rows because they dont have rolling features ie dropna
     let mut feature_vec = feature_vec
         .into_iter()
-        .filter(|row| row.len() == 13)
+        .filter(|row| row.len() == 14)
         .collect::<Vec<_>>();
-    // create the target, add it to the displaced row already
+    // create the target, add it to the displaced row already, 2 is buy, 1 is flat, 0 is sell
+    let mut buys = 0;
+    let mut sells = 0;
+    let mut flats = 0;
     for i in 0..feature_vec.len() - 1 {
-        if i > rolling_period {
-            let difference = feature_vec[i][8] - feature_vec[i - rolling_period][8];
-            if difference > 0.0 {
-                feature_vec[i - rolling_period].push(1.0);
-            } else {
+        if i >= rolling_period {
+            let tick_difference = (feature_vec[i][8] - feature_vec[i - rolling_period][8])/tick_size.to_f32().unwrap();
+            if tick_difference >= MIN_TICKS_FOR_SIGNAL {
+                feature_vec[i - rolling_period].push(2.0);
+                buys += 1;
+            } else if tick_difference <= -MIN_TICKS_FOR_SIGNAL {
                 feature_vec[i - rolling_period].push(0.0);
+                sells += 1;
+            }
+            else {
+                feature_vec[i - rolling_period].push(1.0);
+                flats += 1;
             }
         }
     }
+    info!("Target dist Buys: {} Sells: {} Flats: {}", buys, sells, flats);
     // now we remove the last rows again because they dont have a target
     let mut train = feature_vec
         .into_iter()
-        .filter(|row| row.len() == 14)
+        .filter(|row| row.len() == 15)
         .collect::<Vec<_>>();
-    // break into train and test
+    // break into train and test, 50% train, 50% test
     let mut test = train.split_off(train.len() / 2);
     //begin work on model
     let mut y_train = Vec::new();
@@ -150,7 +160,6 @@ pub async fn manage_model(
         y_train.push(row.pop().unwrap());
     }
     let num_rows = train.len();
-    info!("Length of train: {} labels length: {}", num_rows,y_train.len());
     let train: Vec<f32> = train.into_iter().flatten().collect();
     let x_train: &[f32] = train.as_slice();
     // convert training data into XGBoost's matrix format
@@ -169,15 +178,12 @@ pub async fn manage_model(
     dtest.set_labels(y_test.as_slice()).unwrap();
     // configure objectives, metrics, etc.
     let learning_params = parameters::learning::LearningTaskParametersBuilder::default()
-        .objective(parameters::learning::Objective::BinaryLogistic)
+        .objective(parameters::learning::Objective::MultiSoftmax(3))
         .build()
         .unwrap();
 
     // configure the tree-based learning model's parameters
     let tree_params = parameters::tree::TreeBoosterParametersBuilder::default()
-        .max_depth(6)
-        .eta(1.0)
-        .colsample_bytree(0.8)
         .build()
         .unwrap();
 
@@ -194,7 +200,7 @@ pub async fn manage_model(
     // overall configuration for training/evaluation
     let params = parameters::TrainingParametersBuilder::default()
         .dtrain(&dtrain) // dataset to train with
-        .boost_rounds(2000) // number of training iterations
+        .boost_rounds(1000000) // number of training iterations
         .booster_params(booster_params) // model parameters
         .evaluation_sets(Some(evaluation_sets)) // optional datasets to evaluate against in each iteration
         .build()

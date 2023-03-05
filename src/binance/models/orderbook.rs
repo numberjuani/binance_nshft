@@ -58,15 +58,6 @@ impl OrderBook {
             bids_asks_ratio.to_f32().unwrap(),
         ]
     }
-    pub fn feature_names() -> Vec<String> {
-        vec![
-            "bid_total".to_string(),
-            "num_ticks_from_best_bid".to_string(),
-            "ask_total".to_string(),
-            "num_ticks_from_best_ask".to_string(),
-            "bids_asks_ratio".to_string(),
-        ]
-    }
     pub fn new_from_update(update: OrderbookMessage) -> Self {
         Self {
             bids: update.bids,
