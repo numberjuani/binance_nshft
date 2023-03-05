@@ -20,7 +20,8 @@ serde_json = "1.0.93"
 chrono = { version = "0.4.23", features = ["serde"] }
 serde_with = { version = "2.2.0", features = ["chrono"] }
 futures = "0.3.26"
-rayon = "1.6.1"
+rayon = "1.7.0"
 rust_decimal = { version = "1.28.1", features = ["serde-with-str"] }
 itertools = "0.10.5"
+xgboost = "0.1.4"
 

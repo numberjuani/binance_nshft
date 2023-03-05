@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{error};
 use serde_json::Value;
 use crate::binance::models::orderbook::{OrderBooksRWL, OrderbookMessage, OrderBook};
 

@@ -34,16 +34,19 @@ pub struct Trade {
     pub buyer_is_the_market_maker: bool,
 }
 impl Trade {
-    pub fn to_feature(&self) -> Vec<f64> {
+    pub fn to_feature(&self) -> Vec<f32> {
         let net_qty = if self.buyer_is_the_market_maker {
-            -self.quantity.to_f64().unwrap()
+            -self.quantity.to_f32().unwrap()
         } else {
-            self.quantity.to_f64().unwrap()
+            self.quantity.to_f32().unwrap()
         };
         vec![
-            self.trade_time.timestamp_millis() as f64,
-            self.price.to_f64().unwrap(),
+            self.trade_time.timestamp_millis() as f32,
+            self.price.to_f32().unwrap(),
             net_qty,
         ]
+    }
+    pub fn feature_names() -> Vec<String> {
+        vec!["timestamp".to_string(), "price".to_string(), "net_qty".to_string()]
     }
 }

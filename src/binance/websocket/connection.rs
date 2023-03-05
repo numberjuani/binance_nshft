@@ -3,7 +3,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use serde_json::{Map, Value};
 use std::sync::Arc;
 use tokio::{
@@ -69,10 +69,10 @@ async fn establish(
         ],
     );
     for endpoint in request.get_ws_urls().iter() {
-        info!("Attempting WS connection to {}", endpoint);
+        debug!("Attempting WS connection to {}", endpoint);
         match tokio_tungstenite::connect_async(endpoint).await {
             Ok((stream, response)) => {
-                info!("Connected to {endpoint} status: {}", response.status());
+                debug!("Connected to {endpoint} status: {}", response.status());
                 let (sender, receiver) = stream.split();
                 let ping_pong = Arc::new(Notify::new());
                 tokio::select! {
@@ -138,7 +138,7 @@ async fn process_incoming_message(
                                         && unrouted_message.contains_key("result")
                                         && unrouted_message["result"].is_null()
                                     {
-                                        info!(
+                                        debug!(
                                             "Successfully subscribed to request id {}",
                                             unrouted_message["id"]
                                         );
@@ -185,7 +185,7 @@ async fn process_outgoing_message(
     let sub_message = request.get_subscribe_message();
     match sender.send(Message::Text(sub_message.clone())).await {
         Ok(_) => {
-            info!("Sent message {}", sub_message.clone());
+            debug!("Sent message {}", sub_message.clone());
         }
         Err(e) => {
             error!("Error {:?} sending {}", e, sub_message);

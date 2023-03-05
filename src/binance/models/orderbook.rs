@@ -32,7 +32,7 @@ pub struct OrderBook {
     pub is_valid: bool,
 }
 impl OrderBook {
-    pub fn to_features(self,tick_size:Decimal) -> Vec<f64> {
+    pub fn to_features(self,tick_size:Decimal) -> Vec<f32> {
         let bid_total = self.bids.par_iter().map(|b| b.size).sum::<Decimal>();
         let bid_price_volume = self
             .bids
@@ -51,11 +51,20 @@ impl OrderBook {
         let num_ticks_from_best_ask = (ask_price_volume_weighted - self.asks[0].price)/tick_size;
         let bids_asks_ratio = bid_total / ask_total;
         vec![
-            bid_total.to_f64().unwrap(),
-            num_ticks_from_best_bid.to_f64().unwrap(),
-            ask_total.to_f64().unwrap(),
-            num_ticks_from_best_ask.to_f64().unwrap(),
-            bids_asks_ratio.to_f64().unwrap(),
+            bid_total.to_f32().unwrap(),
+            num_ticks_from_best_bid.to_f32().unwrap(),
+            ask_total.to_f32().unwrap(),
+            num_ticks_from_best_ask.to_f32().unwrap(),
+            bids_asks_ratio.to_f32().unwrap(),
+        ]
+    }
+    pub fn feature_names() -> Vec<String> {
+        vec![
+            "bid_total".to_string(),
+            "num_ticks_from_best_bid".to_string(),
+            "ask_total".to_string(),
+            "num_ticks_from_best_ask".to_string(),
+            "bids_asks_ratio".to_string(),
         ]
     }
     pub fn new_from_update(update: OrderbookMessage) -> Self {
