@@ -6,11 +6,12 @@ mod model;
 mod utils;
 pub const MIN_TRADES_TO_START: usize = 1000;
 pub const MIN_TICKS_FOR_SIGNAL: f32 = 6.0;
-
+mod log_config;
+mod bucket_utils;
 
 #[tokio::main]
 async fn main() {
-    log4rs::init_file("log_config.yaml", Default::default()).unwrap();
+    log_config::configure_log(log::LevelFilter::Info);
     info!("Starting program");
     let symbol = "BTCUSDT";
     let exchange_info = binance::rest::get_exchange_info().await.unwrap();

@@ -12,7 +12,7 @@ pub async fn handle_trades(message:Value,trade_updates_rwl:Arc<RwLock<Vec<Trade>
         Ok(trade) => {
             let mut write = trade_updates_rwl.write().await;
             write.push(trade);
-            if write.len() == MIN_TRADES_TO_START {
+            if write.len() % MIN_TRADES_TO_START == 0 {
                 enough_data_notify.notify_one();
             }
         }
