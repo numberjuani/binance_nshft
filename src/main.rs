@@ -4,7 +4,7 @@ use binance::websocket::connection::establish_and_persist;
 use log::{info, warn, debug};
 mod model;
 mod utils;
-pub const MIN_TRADES_TO_START: usize = 1000;
+pub const MIN_TRADES_TO_START: usize = 10000;
 pub const MIN_TICKS_FOR_SIGNAL: f32 = 6.0;
 mod log_config;
 mod bucket_utils;
