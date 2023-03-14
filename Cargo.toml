@@ -23,6 +23,7 @@ futures = "0.3.26"
 rayon = "1.7.0"
 rust_decimal = { version = "1.28.1", features = ["serde-with-str"] }
 itertools = "0.10.5"
-xgboost = "0.1.4"
-aws-sdk-s3 = "0.24.0"
-aws-config = "0.54.1"
+#gbdt = { package = "gbdt", git = "https://github.com/numberjuani/gbdt-rs" }
+gbdt = { package = "gbdt", path = "/Users/juanmarquez/Documents/gbdt-rs" }
+polars = {version="0.27.2",features=["parquet"]}
+

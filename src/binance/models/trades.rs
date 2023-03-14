@@ -34,7 +34,7 @@ pub struct Trade {
     pub buyer_is_the_market_maker: bool,
 }
 impl Trade {
-    pub fn to_feature(&self) -> Vec<f32> {
+    pub fn to_features(&self) -> Vec<f32> {
         let net_qty = if self.buyer_is_the_market_maker {
             -self.quantity.to_f32().unwrap()
         } else {

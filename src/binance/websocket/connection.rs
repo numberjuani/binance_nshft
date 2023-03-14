@@ -30,16 +30,16 @@ type IncomingSocket = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 pub async fn establish_and_persist(
     orderbooks_rwl: OrderBooksRWL,
     trade_updates_rwl: Arc<RwLock<Vec<Trade>>>,
-    enough_data_notify: Arc<Notify>,
-    market:Symbol
+    market:Symbol,
+    notify: Arc<Notify>
 ) {
     let mut bad_attempts = 0;
     loop {
         if establish(
             orderbooks_rwl.clone(),
             trade_updates_rwl.clone(),
-            enough_data_notify.clone(),
-            market.clone()
+            market.clone(),
+            notify.clone(),
         )
         .await
         {
@@ -58,8 +58,8 @@ pub async fn establish_and_persist(
 async fn establish(
     orderbooks_rwl: OrderBooksRWL,
     trade_updates_rwl: Arc<RwLock<Vec<Trade>>>,
-    enough_data_notify: Arc<Notify>,
-    market:Symbol
+    market:Symbol,
+    notify: Arc<Notify>
 ) -> bool {
     let request = DataRequest::new(
         BinanceAssetType::Futures(FuturesType::USDMargined),
@@ -76,7 +76,7 @@ async fn establish(
                 let (sender, receiver) = stream.split();
                 let ping_pong = Arc::new(Notify::new());
                 tokio::select! {
-                    _= process_incoming_message(receiver, ping_pong.clone(),orderbooks_rwl.clone(),trade_updates_rwl.clone(),enough_data_notify.clone()) => {
+                    _= process_incoming_message(receiver, ping_pong.clone(),orderbooks_rwl.clone(),trade_updates_rwl.clone(),notify) => {
                         error!("Incoming message processing failed");
                         return true;
                     }
@@ -100,7 +100,7 @@ async fn process_incoming_message(
     ping_pong: Arc<Notify>,
     orderbooks_rwl: OrderBooksRWL,
     trade_updates_rwl: Arc<RwLock<Vec<Trade>>>,
-    enough_data_notify: Arc<Notify>
+    notify: Arc<Notify>,
 ) {
     receiver
         .for_each(|message| async {
@@ -122,9 +122,9 @@ async fn process_incoming_message(
                                         handle_trades(
                                             unrouted_message["data"].clone(),
                                             trade_updates_rwl.clone(),
-                                            enough_data_notify.clone()
                                         )
                                         .await;
+                                        notify.notify_one();
                                     }
                                     "bookTicker" => {
                                         handle_book_ticker(unrouted_message["data"].clone()).await;
