@@ -52,6 +52,7 @@ pub async fn establish_and_persist(
             return;
         }
         tokio::time::sleep(Duration::seconds(bad_attempts * 5 + 1).to_std().unwrap()).await;
+        orderbooks_rwl.write().await.clear();
     }
 }
 /// Establishes a single websocket connection to Binance. Returns true if there was an error.

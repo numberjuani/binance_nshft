@@ -1,21 +1,25 @@
 
 /*
-feature indexes
-0: trade time
-1: trade price
-2: trade net qty (negative for sells)
-3: total bids in orderbook
-4: number of ticks between best bid and size-weighted average bid price
-5: total asks in orderbook
-6: number of ticks between best ask and size-weighted average ask price
-7: bids/asks ratio
-8: price_mean
-9: price_std
-10: qty_mean
-11: qty_std
-12: mean_bid_asks_ratio
-13: total_volume
-14:target
+0: timestamp
+1: price
+2: net qty
+3: notional
+4: bid_total.
+5: num_ticks_from_best_bid
+6: ask_total
+7: num_ticks_from_best_ask
+8: bids_asks_ratio
+9: bid_notional
+10: ask_notional
+rolling
+11: rolling_qty,
+12: mean_qty,
+13: qty_std,
+14: mean_price,
+15: price_std,
+16: book_ratio_rolling_mean,
+17 : rolling_qty_abs,
+18: target
  */
 
 
@@ -61,7 +65,7 @@ impl FeatureDataFrame {
         for i in self.rolling_window..self.data.len() - 1 {
             let net_qty_rolling = self.data[i - self.rolling_window..i]
                 .par_iter()
-                .map(|x| x[2])
+                .map(|x| x[3])
                 .collect::<Vec<_>>();
             let rolling_qty = net_qty_rolling.par_iter().sum::<f32>();
             let mean_qty = rolling_qty / self.rolling_window as f32;
@@ -86,14 +90,14 @@ impl FeatureDataFrame {
             );
             let book_ratio_rolling_mean = self.data[i - self.rolling_window..i]
                 .par_iter()
-                .map(|x| x[7])
+                .map(|x| x[8])
                 .collect::<Vec<_>>()
                 .par_iter()
                 .sum::<f32>()
                 / self.rolling_window as f32;
             let rolling_qty_abs = self.data[i - self.rolling_window..i]
                 .par_iter()
-                .map(|x| x[2].abs())
+                .map(|x| x[3].abs())
                 .collect::<Vec<_>>()
                 .par_iter()
                 .sum::<f32>();

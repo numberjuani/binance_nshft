@@ -48,18 +48,19 @@ pub async fn manage_model(
             info!("No training data");
             continue;
         }
-        if train.last().unwrap().len() == 16 {
+        if train.last().unwrap().len() == 19 {
             let mut train_dv: DataVec = DataVec::from_iter(
                 train
                     .into_iter()
-                    .map(|row| Data::new_training_data(row[0..15].to_vec(), 1.0, row[15], None)),
+                    .map(|row| Data::new_training_data(row[0..18].to_vec(), 1.0, row[18], None)),
             );
-            let y_test = test.iter().map(|x| x[15]).collect::<Vec<f32>>();
+            let y_test = test.iter().map(|x| x[18]).collect::<Vec<f32>>();
             let test_dv: DataVec = DataVec::from_iter(
                 test.into_iter()
-                    .map(|row| Data::new_test_data(row[0..15].to_vec(), Some(row[15]))),
+                    .map(|row| Data::new_test_data(row[0..18].to_vec(), Some(row[18]))),
             );
             let mut gbdt = model_mutex.lock().await;
+            gbdt.model.conf.feature_size = 18;
             info!("Fitting model...");
             gbdt.model.fit(&mut train_dv);
             gbdt.model
@@ -96,7 +97,7 @@ pub async fn manage_model(
                 100.0 * (same_sign as f32 / predicted.len() as f32)
             );
             info!(
-                "Exact same: {}",
+                "Exact same: {:.2}%",
                 100.0 * (exact_same as f32 / predicted.len() as f32)
             );
             let real_mae = std::cmp::max(average_error, 4);

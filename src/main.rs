@@ -8,10 +8,8 @@ mod utils;
 pub const MIN_TRADES_TO_START: usize = 10000;
 pub const MIN_TICKS_FOR_SIGNAL: i32 = 30;
 pub const ROLLING_WINDOW: usize = 500;
-pub const TRAINING_INTERVAL:u64 = 60*10;
+pub const TRAINING_INTERVAL:u64 = 60*2;
 mod log_config;
-
-
 
 #[tokio::main]
 async fn main() {
@@ -31,12 +29,11 @@ async fn main() {
                 biased;
                 _ = tokio::signal::ctrl_c() => {
                     warn!("Ctrl-C received, exiting");
-                    //cancel orders, close positions
                 },
                 _ = tokio::spawn(establish_and_persist(orderbooks_rwl.clone(), trade_update_messages.clone(),market.clone(),notify.clone())) => {
                     warn!("Websocket connection closed");
                 }
-                _ =tokio::spawn(make_predictions(orderbooks_rwl.clone(),trade_update_messages.clone(),market.clone(),model_mutex.clone(),notify,order_send)) => {
+                _ = tokio::spawn(make_predictions(orderbooks_rwl.clone(),trade_update_messages.clone(),market.clone(),model_mutex.clone(),notify,order_send)) => {
                     info!("Exiting prediction thread");
                 }
                 _ = tokio::spawn(manage_model(orderbooks_rwl.clone(),trade_update_messages,market,model_mutex.clone())) => {

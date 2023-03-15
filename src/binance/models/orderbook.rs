@@ -50,12 +50,16 @@ impl OrderBook {
         let ask_price_volume_weighted = round_to_nearest_tick(ask_price_volume / ask_total,tick_size);
         let num_ticks_from_best_ask = (ask_price_volume_weighted - self.asks[0].price)/tick_size;
         let bids_asks_ratio = bid_total / ask_total;
+        let bid_notional = self.bids.par_iter().map(|b| b.price * b.size).sum::<Decimal>();
+        let ask_notional = self.asks.par_iter().map(|a| a.price * a.size).sum::<Decimal>();
         vec![
             bid_total.to_f32().unwrap(),
             num_ticks_from_best_bid.to_f32().unwrap(),
             ask_total.to_f32().unwrap(),
             num_ticks_from_best_ask.to_f32().unwrap(),
             bids_asks_ratio.to_f32().unwrap(),
+            bid_notional.to_f32().unwrap(),
+            ask_notional.to_f32().unwrap(),
         ]
     }
     pub fn new_from_update(update: OrderbookMessage) -> Self {

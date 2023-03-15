@@ -38,12 +38,13 @@ pub async fn make_predictions(
             .unwrap();
             features.calculate_rolling_features();
             let test = features.data.last().unwrap();
-            if test.len() == 15 {
+            if test.len() == 19 {
                 let test_dv: DataVec = vec![Data::new_test_data(
-                    test[0..15].to_vec(),
+                    test[0..18].to_vec(),
                     None,
                 )];
-                let gbdt = model_mutex.lock().await;
+                let mut gbdt = model_mutex.lock().await;
+                gbdt.model.conf.feature_size = 18;
                 let predicted: PredVec = gbdt.model.predict(&test_dv);
                 let round_pred = ((predicted.first().unwrap() / tick_size.to_f32().unwrap())
                     .round()

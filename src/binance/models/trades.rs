@@ -44,6 +44,13 @@ impl Trade {
             self.trade_time.timestamp_millis() as f32,
             self.price.to_f32().unwrap(),
             net_qty,
+            self.price.to_f32().unwrap()*net_qty,
         ]
     }
 }
+/*
+0: timestamp
+1: price
+2: net qty
+3: notional
+ */

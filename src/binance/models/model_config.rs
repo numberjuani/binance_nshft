@@ -17,7 +17,7 @@ pub fn new_model_data() -> ModelMutex {
         Err(_) => {
             info!("No model found, creating new model");
             let mut cfg = Config::new();
-            cfg.set_feature_size(15);
+            cfg.set_feature_size(18);
             cfg.set_max_depth(6);
             cfg.set_iterations(500);
             cfg.set_shrinkage(0.1);
