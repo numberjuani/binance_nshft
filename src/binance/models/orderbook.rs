@@ -9,11 +9,11 @@ use serde::Serialize;
 use serde_with::{serde_as, TimestampMilliSeconds};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-pub type OrderBooksRWL = Arc<RwLock<Vec<OrderBook>>>;
+pub type OrderBooksRWL = Arc<RwLock<OrderBook>>;
 use rayon::prelude::*;
 
 pub fn new_orderbooks_rwl() -> OrderBooksRWL {
-    Arc::new(RwLock::new(Vec::new()))
+    Arc::new(RwLock::new(OrderBook::default()))
 }
 use rust_decimal::Decimal;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
@@ -22,7 +22,7 @@ pub struct PriceSize {
     pub size: Decimal,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize,Default)]
 pub struct OrderBook {
     pub bids: Vec<PriceSize>,
     pub asks: Vec<PriceSize>,
@@ -32,8 +32,16 @@ pub struct OrderBook {
     pub is_valid: bool,
 }
 impl OrderBook {
-    pub fn to_features(self,tick_size:Decimal) -> Vec<f32> {
+    pub fn is_empty(&self) -> bool {
+        self.bids.is_empty() && self.asks.is_empty()
+    }
+    pub fn to_features(self,tick_size:Decimal) -> Option<Vec<f32>> {
         let bid_total = self.bids.par_iter().map(|b| b.size).sum::<Decimal>();
+        let ask_total = self.asks.par_iter().map(|a| a.size).sum::<Decimal>();
+        if bid_total == Decimal::ZERO || ask_total == Decimal::ZERO {
+            warn!("Bid or ask total is zero");
+            return None;
+        }
         let bid_price_volume = self
             .bids
             .par_iter()
@@ -41,7 +49,6 @@ impl OrderBook {
             .sum::<Decimal>();
         let bid_price_volume_weighted = round_to_nearest_tick(bid_price_volume / bid_total,tick_size);
         let num_ticks_from_best_bid = (self.bids[0].price - bid_price_volume_weighted)/tick_size;
-        let ask_total = self.asks.par_iter().map(|a| a.size).sum::<Decimal>();
         let ask_price_volume = self
             .asks
             .par_iter()
@@ -52,7 +59,7 @@ impl OrderBook {
         let bids_asks_ratio = bid_total / ask_total;
         let bid_notional = self.bids.par_iter().map(|b| b.price * b.size).sum::<Decimal>();
         let ask_notional = self.asks.par_iter().map(|a| a.price * a.size).sum::<Decimal>();
-        vec![
+        Some(vec![
             bid_total.to_f32().unwrap(),
             num_ticks_from_best_bid.to_f32().unwrap(),
             ask_total.to_f32().unwrap(),
@@ -60,7 +67,7 @@ impl OrderBook {
             bids_asks_ratio.to_f32().unwrap(),
             bid_notional.to_f32().unwrap(),
             ask_notional.to_f32().unwrap(),
-        ]
+        ])
     }
     pub fn new_from_update(update: OrderbookMessage) -> Self {
         Self {
@@ -72,7 +79,7 @@ impl OrderBook {
             first_update_id: update.first_update_id,
         }
     }
-    pub fn update(mut self, update: OrderbookMessage) -> Self {
+    pub fn update(&mut self, update: OrderbookMessage) {
         //Check that the order of updates is whats expected, different process for spot and futures.
         let orderly = match update.prev_last_update_id {
             Some(previous) => previous == self.last_update_id,
@@ -111,7 +118,6 @@ impl OrderBook {
         self.first_update_id = update.first_update_id;
         self.bids.par_sort_unstable_by_key(|b| -b.price);
         self.asks.par_sort_unstable_by_key(|a| a.price);
-        self
     }
 }
 #[serde_as]

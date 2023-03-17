@@ -5,14 +5,12 @@ use crate::binance::models::orderbook::{OrderBooksRWL, OrderbookMessage, OrderBo
 pub async fn handle_depth_update_message(message: Value, orderbooks_rwl: OrderBooksRWL) {
     match serde_json::from_value::<OrderbookMessage>(message) {
         Ok(update) => {
-            let mut books_write = orderbooks_rwl.write().await;
-            if books_write.is_empty() {
-                let book = OrderBook::new_from_update(update.clone());
-                books_write.push(book);
-                return;
+            let mut book = orderbooks_rwl.write().await;
+            if book.is_empty() {
+                *book = OrderBook::new_from_update(update);
+            } else {
+                book.update(update);
             }
-            let latest_updated = books_write.last().unwrap().clone().update(update.clone());
-            books_write.push(latest_updated.clone());
         }
         Err(e) => {
             error!("Error parsing message: {:?}", e);

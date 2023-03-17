@@ -1,22 +1,17 @@
-use std::sync::Arc;
-
 use gbdt::decision_tree::{Data, DataVec, PredVec};
 use log::info;
 use rust_decimal::prelude::ToPrimitive;
-use tokio::sync::RwLock;
 
 use crate::{
     binance::models::{
-        fapi_exchange_info::Symbol, model_config::ModelMutex, orderbook::OrderBooksRWL,
-        trades::Trade,
-    },
-    model::data_handling::FeatureDataFrame,
-    ROLLING_WINDOW, TRAINING_INTERVAL,
+        fapi_exchange_info::Symbol, model_config::ModelMutex,
+    }, TRAINING_INTERVAL,
 };
 
+use super::data_handling::DFRWL;
+
 pub async fn manage_model(
-    orderbooks_rwl: OrderBooksRWL,
-    trades_rwl: Arc<RwLock<Vec<Trade>>>,
+    dataframe_rwl:DFRWL,
     market: Symbol,
     model_mutex: ModelMutex,
 ) {
@@ -25,19 +20,8 @@ pub async fn manage_model(
     loop {
         interval.tick().await;
         info!("Training model...");
-        let trades = trades_rwl.read().await.clone();
-        let orderbooks = orderbooks_rwl.read().await.clone();
-        let mut features = FeatureDataFrame::new(
-            trades,
-            orderbooks,
-            ROLLING_WINDOW,
-            market.get_tick_size().unwrap(),
-        )
-        .unwrap();
-        info!("Features shape: {:?}", features.shape());
-        features.calculate_rolling_features();
-        info!("With rolling Features shape: {:?}", features.shape());
         let tick_size = market.get_tick_size().unwrap().to_f32().unwrap();
+        let mut features = dataframe_rwl.read().await.clone();
         features.add_target_value(tick_size);
         info!("With target var shape: {:?}", features.shape());
         let mut train = features.data.clone();

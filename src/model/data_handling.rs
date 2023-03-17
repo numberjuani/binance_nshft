@@ -22,47 +22,59 @@ rolling
 18: target
  */
 
-
-use rayon::{slice::ParallelSliceMut, prelude::{IntoParallelRefIterator, ParallelIterator}};
-use rust_decimal::Decimal;
+use std::sync::Arc;
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use polars::prelude::*;
+use tokio::sync::RwLock;
+pub type DFRWL = Arc<RwLock<FeatureDataFrame>>;
 
-use crate::binance::models::{trades::Trade, orderbook::OrderBook};
 
-#[derive(Debug)]
+pub fn new_dataframe_rwl() -> DFRWL {
+    let df = FeatureDataFrame::new_empty();
+    Arc::new(RwLock::new(df))
+}
+
+
+#[derive(Debug,Clone)]
 pub struct FeatureDataFrame {
     pub data: Vec<Vec<f32>>,
     pub rolling_window:usize
 }
 impl FeatureDataFrame {
-    pub fn new(mut trades: Vec<Trade>, mut orderbooks: Vec<OrderBook>,rolling_window:usize,tick_size:Decimal) -> Option<Self> {
-        //sort time and sales by f32
-        trades.par_sort_unstable_by_key(|t| t.event_time);
-        orderbooks.par_sort_unstable_by_key(|t| t.time);
-        let mut train: Vec<Vec<f32>> = Vec::new();
-        for trade in trades {
-            //keep only the orderbooks with timestamp <= tas timestamp
-            let valid_books = orderbooks
-                .par_iter()
-                .filter(|b| b.time <= trade.event_time)
-                .collect::<Vec<_>>();
-            //get the book with the closest timestamp
-            let closest_book = valid_books.par_iter().max_by_key(|b| b.time);
-            if closest_book.is_none() {
-                continue;
-            }
-            let mut row = Vec::new();
-            row.append(&mut trade.to_features());
-            row.append(&mut closest_book.unwrap().clone().clone().to_features(tick_size));
-            train.push(row);
-        }
-        Some(Self { data: train  ,rolling_window})
+    pub fn new_empty() -> Self {
+        Self { data: Vec::with_capacity(10000000),rolling_window:0 }
     }
+    // pub fn new(mut trades: Vec<Trade>, mut orderbooks: Vec<OrderBook>,rolling_window:usize,tick_size:Decimal) -> Option<Self> {
+    //     //sort time and sales by f32
+    //     trades.par_sort_unstable_by_key(|t| t.event_time);
+    //     orderbooks.par_sort_unstable_by_key(|t| t.time);
+    //     let mut train: Vec<Vec<f32>> = Vec::new();
+    //     for trade in trades {
+    //         //keep only the orderbooks with timestamp <= tas timestamp
+    //         let valid_books = orderbooks
+    //             .par_iter()
+    //             .filter(|b| b.time <= trade.event_time)
+    //             .collect::<Vec<_>>();
+    //         //get the book with the closest timestamp
+    //         let closest_book = valid_books.par_iter().max_by_key(|b| b.time);
+    //         if closest_book.is_none() {
+    //             continue;
+    //         }
+    //         let mut row = Vec::new();
+    //         row.append(&mut trade.to_features());
+    //         row.append(&mut closest_book.unwrap().clone().clone().to_features(tick_size));
+    //         train.push(row);
+    //     }
+    //     Some(Self { data: train  ,rolling_window})
+    // }
     pub fn calculate_rolling_features(&mut self) {
         if self.data.is_empty() || self.data.len() < self.rolling_window {
             return;
         };
-        for i in self.rolling_window..self.data.len() - 1 {
+        for i in self.data.len() - 1..self.rolling_window {
+            if self.data[i].len() >= 11 {
+                continue;
+            }
             let net_qty_rolling = self.data[i - self.rolling_window..i]
                 .par_iter()
                 .map(|x| x[3])

@@ -4,18 +4,19 @@ use futures_util::{
     SinkExt, StreamExt,
 };
 use log::{debug, error, warn};
+use rust_decimal::Decimal;
 use serde_json::{Map, Value};
 use std::sync::Arc;
 use tokio::{
     net::TcpStream,
-    sync::{Notify, RwLock},
+    sync::{Notify},
 };
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::binance::{
-    models::{orderbook::OrderBooksRWL, trades::Trade, fapi_exchange_info::Symbol},
+use crate::{binance::{
+    models::{orderbook::OrderBooksRWL, fapi_exchange_info::Symbol},
     websocket::handlers::book_ticker::handle_book_ticker,
-};
+}, model::data_handling::DFRWL};
 
 use super::{
     handlers::{depth_update::handle_depth_update_message, trades::handle_trades},
@@ -29,17 +30,17 @@ type IncomingSocket = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 /// It will try a max of 5 times before exiting the program.
 pub async fn establish_and_persist(
     orderbooks_rwl: OrderBooksRWL,
-    trade_updates_rwl: Arc<RwLock<Vec<Trade>>>,
     market:Symbol,
-    notify: Arc<Notify>
+    notify: Arc<Notify>,
+    dataframe_rwl: DFRWL,
 ) {
     let mut bad_attempts = 0;
     loop {
         if establish(
             orderbooks_rwl.clone(),
-            trade_updates_rwl.clone(),
             market.clone(),
             notify.clone(),
+            dataframe_rwl.clone(),
         )
         .await
         {
@@ -52,15 +53,14 @@ pub async fn establish_and_persist(
             return;
         }
         tokio::time::sleep(Duration::seconds(bad_attempts * 5 + 1).to_std().unwrap()).await;
-        orderbooks_rwl.write().await.clear();
     }
 }
 /// Establishes a single websocket connection to Binance. Returns true if there was an error.
 async fn establish(
     orderbooks_rwl: OrderBooksRWL,
-    trade_updates_rwl: Arc<RwLock<Vec<Trade>>>,
     market:Symbol,
-    notify: Arc<Notify>
+    notify: Arc<Notify>,
+    dataframe_rwl: DFRWL,
 ) -> bool {
     let request = DataRequest::new(
         BinanceAssetType::Futures(FuturesType::USDMargined),
@@ -76,12 +76,13 @@ async fn establish(
                 debug!("Connected to {endpoint} status: {}", response.status());
                 let (sender, receiver) = stream.split();
                 let ping_pong = Arc::new(Notify::new());
+                let tick_size = market.get_tick_size().unwrap();
                 tokio::select! {
-                    _= process_incoming_message(receiver, ping_pong.clone(),orderbooks_rwl.clone(),trade_updates_rwl.clone(),notify) => {
+                    _= tokio::spawn(process_incoming_message(receiver, ping_pong.clone(),orderbooks_rwl.clone(),notify,tick_size,dataframe_rwl.clone())) => {
                         error!("Incoming message processing failed");
                         return true;
                     }
-                    _= process_outgoing_message(sender, ping_pong.clone(),request.clone()) => {
+                    _= tokio::spawn(process_outgoing_message(sender, ping_pong.clone(),request.clone())) => {
                         error!("Outgoing message processing failed");
                         return true;
                     }
@@ -100,15 +101,16 @@ async fn process_incoming_message(
     receiver: IncomingSocket,
     ping_pong: Arc<Notify>,
     orderbooks_rwl: OrderBooksRWL,
-    trade_updates_rwl: Arc<RwLock<Vec<Trade>>>,
     notify: Arc<Notify>,
+    tick_size:Decimal,
+    dataframe_rwl: DFRWL
 ) {
     receiver
         .for_each(|message| async {
             match message {
                 Ok(text_message) => match text_message {
                     Message::Text(text_message) => {
-                        debug!("Received message: {}", text_message);
+                        //debug!("Received message: {}", text_message);
                         match serde_json::from_str::<Map<String, Value>>(&text_message) {
                             Ok(unrouted_message) => match unrouted_message.contains_key("data") {
                                 true => match unrouted_message["data"]["e"].as_str().unwrap() {
@@ -122,10 +124,11 @@ async fn process_incoming_message(
                                     "trade" => {
                                         handle_trades(
                                             unrouted_message["data"].clone(),
-                                            trade_updates_rwl.clone(),
-                                        )
-                                        .await;
-                                        notify.notify_one();
+                                            orderbooks_rwl.clone(),
+                                            notify.clone(),
+                                            tick_size,
+                                            dataframe_rwl.clone()
+                                        ).await;
                                     }
                                     "bookTicker" => {
                                         handle_book_ticker(unrouted_message["data"].clone()).await;

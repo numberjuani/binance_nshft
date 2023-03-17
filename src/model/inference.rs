@@ -4,17 +4,16 @@ use gbdt::decision_tree::{Data, DataVec, PredVec};
 
 use log::{info, debug};
 use rust_decimal::prelude::ToPrimitive;
-use tokio::sync::{Notify, mpsc, RwLock};
+use tokio::sync::{Notify, mpsc};
 
 
 
-use crate::{binance::{models::{model_config::ModelMutex, orderbook::OrderBooksRWL, trades::Trade, fapi_exchange_info::Symbol}}, ROLLING_WINDOW};
+use crate::{binance::{models::{model_config::ModelMutex, fapi_exchange_info::Symbol}}, ROLLING_WINDOW};
 
-use super::{data_handling::FeatureDataFrame};
+use super::data_handling::DFRWL;
 
 pub async fn make_predictions(
-    orderbooks_rwl: OrderBooksRWL,
-    trades_rwl: Arc<RwLock<Vec<Trade>>>,
+    dataframe_rwl:DFRWL,
     market: Symbol,
     model_mutex: ModelMutex,
     notify: Arc<Notify>,
@@ -24,23 +23,15 @@ pub async fn make_predictions(
     let mut entry_index = None;
     loop {
         notify.notified().await;
-        let ts = trades_rwl.read().await.clone();
-        let ts_index = ts.len();
-        let ob = orderbooks_rwl.read().await.clone();
+        let mut df = dataframe_rwl.read().await.clone();
+        let ts_index = df.data.len();
         let tick_size = market.get_tick_size().unwrap();
-        if ts.len() >= ROLLING_WINDOW+1 && ob.len() >= ROLLING_WINDOW+1 {
-            let mut features = FeatureDataFrame::new(
-                ts,
-                ob,
-                ROLLING_WINDOW,
-                tick_size,
-            )
-            .unwrap();
-            features.calculate_rolling_features();
-            let test = features.data.last().unwrap();
-            if test.len() == 19 {
+        if ts_index >= ROLLING_WINDOW+1  {
+            df.calculate_rolling_features();
+            let test = df.data.last().unwrap();
+            if test.len() == 18 {
                 let test_dv: DataVec = vec![Data::new_test_data(
-                    test[0..18].to_vec(),
+                    test[0..17].to_vec(),
                     None,
                 )];
                 let mut gbdt = model_mutex.lock().await;
