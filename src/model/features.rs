@@ -3,18 +3,13 @@ use log::info;
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::{
-    binance::models::{
-        fapi_exchange_info::Symbol, model_config::ModelMutex,
-    }, TRAINING_INTERVAL,
+    binance::models::{fapi_exchange_info::Symbol, model_config::ModelMutex},
+    TRAINING_INTERVAL,
 };
 
-use super::data_handling::DFRWL;
+use super::data_handling::Dfrwl;
 
-pub async fn manage_model(
-    dataframe_rwl:DFRWL,
-    market: Symbol,
-    model_mutex: ModelMutex,
-) {
+pub async fn manage_model(dataframe_rwl: Dfrwl, market: Symbol, model_mutex: ModelMutex) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(TRAINING_INTERVAL));
     interval.tick().await;
     loop {
@@ -27,7 +22,6 @@ pub async fn manage_model(
         let mut train = features.data.clone();
         // the first half of the train
         let test = train.split_off(train.len() / 2);
-        // convert training data into XGBoost's matrix format
         if train.is_empty() {
             info!("No training data");
             continue;

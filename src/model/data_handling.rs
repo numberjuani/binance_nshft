@@ -1,4 +1,3 @@
-
 /*
 0: timestamp
 1: price
@@ -22,51 +21,29 @@ rolling
 18: target
  */
 
-use std::sync::Arc;
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use polars::prelude::*;
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use std::sync::Arc;
 use tokio::sync::RwLock;
-pub type DFRWL = Arc<RwLock<FeatureDataFrame>>;
+pub type Dfrwl = Arc<RwLock<FeatureDataFrame>>;
 
-
-pub fn new_dataframe_rwl() -> DFRWL {
+pub fn new_dataframe_rwl() -> Dfrwl {
     let df = FeatureDataFrame::new_empty();
     Arc::new(RwLock::new(df))
 }
 
-
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct FeatureDataFrame {
     pub data: Vec<Vec<f32>>,
-    pub rolling_window:usize
+    pub rolling_window: usize,
 }
 impl FeatureDataFrame {
     pub fn new_empty() -> Self {
-        Self { data: Vec::with_capacity(10000000),rolling_window:0 }
+        Self {
+            data: Vec::with_capacity(10000000),
+            rolling_window: 0,
+        }
     }
-    // pub fn new(mut trades: Vec<Trade>, mut orderbooks: Vec<OrderBook>,rolling_window:usize,tick_size:Decimal) -> Option<Self> {
-    //     //sort time and sales by f32
-    //     trades.par_sort_unstable_by_key(|t| t.event_time);
-    //     orderbooks.par_sort_unstable_by_key(|t| t.time);
-    //     let mut train: Vec<Vec<f32>> = Vec::new();
-    //     for trade in trades {
-    //         //keep only the orderbooks with timestamp <= tas timestamp
-    //         let valid_books = orderbooks
-    //             .par_iter()
-    //             .filter(|b| b.time <= trade.event_time)
-    //             .collect::<Vec<_>>();
-    //         //get the book with the closest timestamp
-    //         let closest_book = valid_books.par_iter().max_by_key(|b| b.time);
-    //         if closest_book.is_none() {
-    //             continue;
-    //         }
-    //         let mut row = Vec::new();
-    //         row.append(&mut trade.to_features());
-    //         row.append(&mut closest_book.unwrap().clone().clone().to_features(tick_size));
-    //         train.push(row);
-    //     }
-    //     Some(Self { data: train  ,rolling_window})
-    // }
     pub fn calculate_rolling_features(&mut self) {
         if self.data.is_empty() || self.data.len() < self.rolling_window {
             return;
@@ -92,7 +69,8 @@ impl FeatureDataFrame {
                 .par_iter()
                 .map(|x| x[1])
                 .collect::<Vec<_>>();
-            let mean_price = last_price_rolling.par_iter().sum::<f32>() / self.rolling_window as f32;
+            let mean_price =
+                last_price_rolling.par_iter().sum::<f32>() / self.rolling_window as f32;
             let price_std = f32::sqrt(
                 last_price_rolling
                     .par_iter()
@@ -152,12 +130,7 @@ impl FeatureDataFrame {
     }
     pub fn drop_na(&mut self) {
         //get the max length of the rows
-        let max_len = self
-            .data
-            .par_iter()
-            .map(|x| x.len())
-            .max()
-            .unwrap();
+        let max_len = self.data.par_iter().map(|x| x.len()).max().unwrap();
         //drop the rows that are not the max length
         self.data.retain(|x| x.len() == max_len);
     }
@@ -168,8 +141,11 @@ impl FeatureDataFrame {
     }
     pub fn save_to_parquet(self, file_name: &str) {
         let mut dataframe = DataFrame::empty();
-        for (index,_) in self.data[0].iter().enumerate() {
-            let series = Series::new(&format!("col_{index}"), self.data.par_iter().map(|x| x[index]).collect::<Vec<_>>());
+        for (index, _) in self.data[0].iter().enumerate() {
+            let series = Series::new(
+                &format!("col_{index}"),
+                self.data.par_iter().map(|x| x[index]).collect::<Vec<_>>(),
+            );
             dataframe.with_column(series).unwrap();
         }
         let mut file = std::fs::File::create(file_name).unwrap();
@@ -178,7 +154,7 @@ impl FeatureDataFrame {
             .finish(&mut dataframe)
             .unwrap();
     }
-    // pub fn read_from_parquet(file_name: &str,rolling_window:usize) -> Result<Self, Box<dyn std::error::Error>> {     
+    // pub fn read_from_parquet(file_name: &str,rolling_window:usize) -> Result<Self, Box<dyn std::error::Error>> {
     //     let mut file = std::fs::File::open(file_name)?;
     //     let df = ParquetReader::new(&mut file).finish()?;
     //     let mut out = Vec::new();
@@ -189,5 +165,3 @@ impl FeatureDataFrame {
     //     Ok(Self { data: out ,rolling_window})
     // }
 }
-
-

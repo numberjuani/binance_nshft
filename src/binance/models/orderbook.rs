@@ -22,7 +22,7 @@ pub struct PriceSize {
     pub size: Decimal,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize,Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct OrderBook {
     pub bids: Vec<PriceSize>,
     pub asks: Vec<PriceSize>,
@@ -35,7 +35,7 @@ impl OrderBook {
     pub fn is_empty(&self) -> bool {
         self.bids.is_empty() && self.asks.is_empty()
     }
-    pub fn to_features(self,tick_size:Decimal) -> Option<Vec<f32>> {
+    pub fn to_features(&self, tick_size: Decimal) -> Option<Vec<f32>> {
         let bid_total = self.bids.par_iter().map(|b| b.size).sum::<Decimal>();
         let ask_total = self.asks.par_iter().map(|a| a.size).sum::<Decimal>();
         if bid_total == Decimal::ZERO || ask_total == Decimal::ZERO {
@@ -47,18 +47,28 @@ impl OrderBook {
             .par_iter()
             .map(|b| b.price * b.size)
             .sum::<Decimal>();
-        let bid_price_volume_weighted = round_to_nearest_tick(bid_price_volume / bid_total,tick_size);
-        let num_ticks_from_best_bid = (self.bids[0].price - bid_price_volume_weighted)/tick_size;
+        let bid_price_volume_weighted =
+            round_to_nearest_tick(bid_price_volume / bid_total, tick_size);
+        let num_ticks_from_best_bid = (self.bids[0].price - bid_price_volume_weighted) / tick_size;
         let ask_price_volume = self
             .asks
             .par_iter()
             .map(|a| a.price * a.size)
             .sum::<Decimal>();
-        let ask_price_volume_weighted = round_to_nearest_tick(ask_price_volume / ask_total,tick_size);
-        let num_ticks_from_best_ask = (ask_price_volume_weighted - self.asks[0].price)/tick_size;
+        let ask_price_volume_weighted =
+            round_to_nearest_tick(ask_price_volume / ask_total, tick_size);
+        let num_ticks_from_best_ask = (ask_price_volume_weighted - self.asks[0].price) / tick_size;
         let bids_asks_ratio = bid_total / ask_total;
-        let bid_notional = self.bids.par_iter().map(|b| b.price * b.size).sum::<Decimal>();
-        let ask_notional = self.asks.par_iter().map(|a| a.price * a.size).sum::<Decimal>();
+        let bid_notional = self
+            .bids
+            .par_iter()
+            .map(|b| b.price * b.size)
+            .sum::<Decimal>();
+        let ask_notional = self
+            .asks
+            .par_iter()
+            .map(|a| a.price * a.size)
+            .sum::<Decimal>();
         Some(vec![
             bid_total.to_f32().unwrap(),
             num_ticks_from_best_bid.to_f32().unwrap(),

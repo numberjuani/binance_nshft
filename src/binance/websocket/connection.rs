@@ -7,20 +7,20 @@ use log::{debug, error, warn};
 use rust_decimal::Decimal;
 use serde_json::{Map, Value};
 use std::sync::Arc;
-use tokio::{
-    net::TcpStream,
-    sync::{Notify},
-};
+use tokio::{net::TcpStream, sync::Notify};
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::{binance::{
-    models::{orderbook::OrderBooksRWL, fapi_exchange_info::Symbol},
-    websocket::handlers::book_ticker::handle_book_ticker,
-}, model::data_handling::DFRWL};
+use crate::{
+    binance::{
+        models::{fapi_exchange_info::Symbol, orderbook::OrderBooksRWL},
+        websocket::handlers::book_ticker::handle_book_ticker,
+    },
+    model::data_handling::Dfrwl,
+};
 
 use super::{
     handlers::{depth_update::handle_depth_update_message, trades::handle_trades},
-    requests::{DataRequest, BinanceAssetType, FuturesType, Stream},
+    requests::{BinanceAssetType, DataRequest, FuturesType, Stream},
 };
 
 type OutgoingSocket = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
@@ -30,9 +30,9 @@ type IncomingSocket = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 /// It will try a max of 5 times before exiting the program.
 pub async fn establish_and_persist(
     orderbooks_rwl: OrderBooksRWL,
-    market:Symbol,
+    market: Symbol,
     notify: Arc<Notify>,
-    dataframe_rwl: DFRWL,
+    dataframe_rwl: Dfrwl,
 ) {
     let mut bad_attempts = 0;
     loop {
@@ -58,9 +58,9 @@ pub async fn establish_and_persist(
 /// Establishes a single websocket connection to Binance. Returns true if there was an error.
 async fn establish(
     orderbooks_rwl: OrderBooksRWL,
-    market:Symbol,
+    market: Symbol,
     notify: Arc<Notify>,
-    dataframe_rwl: DFRWL,
+    dataframe_rwl: Dfrwl,
 ) -> bool {
     let request = DataRequest::new(
         BinanceAssetType::Futures(FuturesType::USDMargined),
@@ -102,8 +102,8 @@ async fn process_incoming_message(
     ping_pong: Arc<Notify>,
     orderbooks_rwl: OrderBooksRWL,
     notify: Arc<Notify>,
-    tick_size:Decimal,
-    dataframe_rwl: DFRWL
+    tick_size: Decimal,
+    dataframe_rwl: Dfrwl,
 ) {
     receiver
         .for_each(|message| async {
@@ -127,8 +127,9 @@ async fn process_incoming_message(
                                             orderbooks_rwl.clone(),
                                             notify.clone(),
                                             tick_size,
-                                            dataframe_rwl.clone()
-                                        ).await;
+                                            dataframe_rwl.clone(),
+                                        )
+                                        .await;
                                     }
                                     "bookTicker" => {
                                         handle_book_ticker(unrouted_message["data"].clone()).await;
@@ -166,7 +167,6 @@ async fn process_incoming_message(
                     Message::Pong(_) => {}
                     Message::Close(cf) => {
                         warn!("Close received {cf:?}");
-                        return;
                     }
                     Message::Frame(_) => {
                         warn!("Frame received");
@@ -174,7 +174,6 @@ async fn process_incoming_message(
                 },
                 Err(e) => {
                     warn!("Error receiving message: {:?}", e);
-                    return;
                 }
             }
         })

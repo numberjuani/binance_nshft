@@ -1,3 +1,3 @@
 pub mod connection;
-pub mod requests;
 pub mod handlers;
+pub mod requests;

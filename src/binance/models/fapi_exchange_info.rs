@@ -66,12 +66,12 @@ pub struct Symbol {
     pub underlying_sub_type: Vec<String>,
     pub underlying_type: String,
 }
-impl Symbol  {
+impl Symbol {
     pub fn get_tick_size(&self) -> Option<Decimal> {
-        match self.filters.par_iter().find_first(|f|f.filter_type == "PRICE_FILTER") {
-            Some(f) => Some(Decimal::from_str(&f.tick_size.as_ref().unwrap()).unwrap()),
-            None => None
-        }
+        self.filters
+            .par_iter()
+            .find_first(|f| f.filter_type == "PRICE_FILTER")
+            .map(|f| Decimal::from_str(f.tick_size.as_ref().unwrap()).unwrap())
     }
 }
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
