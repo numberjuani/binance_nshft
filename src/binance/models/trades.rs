@@ -51,9 +51,9 @@ impl<'a> Trade<'a> {
             price_f32 * net_qty,
         ]
     }
-    pub fn miliseconds_since_event(&self) -> i64 {
-        Utc::now().timestamp_millis() - self.event_time.timestamp_millis()
-    }
+    // pub fn miliseconds_since_event(&self) -> i64 {
+    //     Utc::now().timestamp_millis() - self.event_time.timestamp_millis()
+    // }
 }
 
 /*
