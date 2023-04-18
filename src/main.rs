@@ -17,7 +17,7 @@ mod log_config;
 
 #[tokio::main]
 async fn main() {
-    log_config::configure_log(log::LevelFilter::Debug);
+    log_config::configure_log(log::LevelFilter::Info);
     info!("Starting program");
     let symbol = "BTCUSDT";
     let exchange_info = binance::rest::get_exchange_info().await.unwrap();

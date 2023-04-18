@@ -2,11 +2,13 @@ use crate::binance::constants::Symbol;
 use crate::utils::round_to_nearest_tick;
 use chrono::DateTime;
 use chrono::Utc;
+use log::debug;
 use log::warn;
 use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{serde_as, TimestampMilliSeconds};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 pub type OrderBooksRWL = Arc<RwLock<OrderBook>>;
@@ -39,7 +41,7 @@ impl OrderBook {
         let bid_total = self.bids.par_iter().map(|b| b.size).sum::<Decimal>();
         let ask_total = self.asks.par_iter().map(|a| a.size).sum::<Decimal>();
         if bid_total == Decimal::ZERO || ask_total == Decimal::ZERO {
-            warn!("Bid or ask total is zero");
+            debug!("Bid or ask total is zero");
             return None;
         }
         let bid_price_volume = self
@@ -90,7 +92,6 @@ impl OrderBook {
         }
     }
     pub fn update(&mut self, update: OrderbookMessage) {
-        //Check that the order of updates is whats expected, different process for spot and futures.
         let orderly = match update.prev_last_update_id {
             Some(previous) => previous == self.last_update_id,
             None => self.last_update_id == update.first_update_id - 1,
@@ -99,33 +100,20 @@ impl OrderBook {
             warn!("Orderbook update for {} not orderly", update.symbol);
             self.is_valid = false;
         }
-        for bid in update.bids {
-            if let Some(matching_bid) = self.bids.par_iter().position_any(|b| b.price == bid.price)
-            {
-                if bid.size.is_zero() {
-                    self.bids.remove(matching_bid);
-                } else {
-                    self.bids[matching_bid].size = bid.size;
-                }
-            } else {
-                self.bids.push(bid);
-            }
-        }
-        for ask in update.asks {
-            if let Some(matching_ask) = self.asks.par_iter().position_any(|a| a.price == ask.price)
-            {
-                if ask.size.is_zero() {
-                    self.asks.remove(matching_ask);
-                } else {
-                    self.asks[matching_ask].size = ask.size;
-                }
-            } else {
-                self.asks.push(ask);
-            }
-        }
+    
+        let update_bids_map: HashMap<_, _> = update.bids.into_iter().map(|b| (b.price, b.size)).collect();
+        let update_asks_map: HashMap<_, _> = update.asks.into_iter().map(|a| (a.price, a.size)).collect();
+    
+        // Process bids and asks in parallel
+        rayon::join(
+            || update_orders(&mut self.bids, &update_bids_map),
+            || update_orders(&mut self.asks, &update_asks_map),
+        );
+    
         self.time = update.time;
         self.last_update_id = update.last_update_id;
         self.first_update_id = update.first_update_id;
+    
         self.bids.par_sort_unstable_by_key(|b| -b.price);
         self.asks.par_sort_unstable_by_key(|a| a.price);
     }
@@ -182,4 +170,25 @@ pub struct UpdateCSVFormat {
     pub timestamp: DateTime<Utc>,
     pub price: Decimal,
     pub quantity: Decimal,
+}
+
+
+fn update_orders(orders: &mut Vec<PriceSize>, updates: &HashMap<Decimal, Decimal>) {
+    orders.par_iter_mut().for_each(|o| {
+        if let Some(size) = updates.get(&o.price) {
+            o.size = *size;
+        }
+    });
+
+    let new_orders: Vec<PriceSize> = updates
+        .par_iter()
+        .filter(|(price, _)| !orders.par_iter().any(|o| o.price == **price))
+        .map(|(price, size)| PriceSize {
+            price: *price,
+            size: *size,
+        })
+        .collect();
+
+    orders.extend(new_orders);
+    orders.retain(|o| !o.size.is_zero());
 }

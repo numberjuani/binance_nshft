@@ -1,3 +1,10 @@
+use crate::{
+    binance::{
+        models::{fapi_exchange_info::Symbol, orderbook::OrderBooksRWL},
+        websocket::handlers::book_ticker::handle_book_ticker,
+    },
+    model::data_handling::Dfrwl,
+};
 use chrono::Duration;
 use futures_util::{
     stream::{SplitSink, SplitStream},
@@ -7,16 +14,9 @@ use log::{debug, error, warn};
 use rust_decimal::Decimal;
 use serde_json::{Map, Value};
 use std::sync::Arc;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::{net::TcpStream, sync::Notify};
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
-
-use crate::{
-    binance::{
-        models::{fapi_exchange_info::Symbol, orderbook::OrderBooksRWL},
-        websocket::handlers::book_ticker::handle_book_ticker,
-    },
-    model::data_handling::Dfrwl,
-};
 
 use super::{
     handlers::{depth_update::handle_depth_update_message, trades::handle_trades},
@@ -98,86 +98,115 @@ async fn establish(
 }
 
 async fn process_incoming_message(
-    receiver: IncomingSocket,
+    mut receiver: IncomingSocket,
     ping_pong: Arc<Notify>,
     orderbooks_rwl: OrderBooksRWL,
     notify: Arc<Notify>,
     tick_size: Decimal,
     dataframe_rwl: Dfrwl,
 ) {
-    receiver
-        .for_each(|message| async {
-            match message {
-                Ok(text_message) => match text_message {
-                    Message::Text(text_message) => {
-                        //debug!("Received message: {}", text_message);
-                        match serde_json::from_str::<Map<String, Value>>(&text_message) {
-                            Ok(unrouted_message) => match unrouted_message.contains_key("data") {
-                                true => match unrouted_message["data"]["e"].as_str().unwrap() {
-                                    "depthUpdate" => {
-                                        handle_depth_update_message(
-                                            unrouted_message["data"].clone(),
-                                            orderbooks_rwl.clone(),
-                                        )
-                                        .await;
-                                    }
-                                    "trade" => {
-                                        handle_trades(
-                                            unrouted_message["data"].clone(),
-                                            orderbooks_rwl.clone(),
-                                            notify.clone(),
-                                            tick_size,
-                                            dataframe_rwl.clone(),
-                                        )
-                                        .await;
-                                    }
-                                    "bookTicker" => {
-                                        handle_book_ticker(unrouted_message["data"].clone()).await;
-                                    }
-                                    _ => {
-                                        debug!("Unrecognized message: {:?}", unrouted_message);
-                                    }
-                                },
-                                false => {
-                                    if unrouted_message.keys().len() == 2
-                                        && unrouted_message.contains_key("result")
-                                        && unrouted_message["result"].is_null()
-                                    {
-                                        debug!(
-                                            "Successfully subscribed to request id {}",
-                                            unrouted_message["id"]
-                                        );
-                                    } else {
-                                        warn!("Unrecognized message: {:?}", unrouted_message);
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                error!("Error parsing message: {:?}", e);
-                            }
-                        }
-                    }
-                    Message::Binary(_) => {
-                        warn!("Binary message received");
-                    }
-                    Message::Ping(_) => {
-                        debug!("Received ping");
-                        ping_pong.notify_one();
-                    }
-                    Message::Pong(_) => {}
-                    Message::Close(cf) => {
-                        warn!("Close received {cf:?}");
-                    }
-                    Message::Frame(_) => {
-                        warn!("Frame received");
-                    }
-                },
-                Err(e) => {
-                    warn!("Error receiving message: {:?}", e);
+    let (tx, rx): (Sender<Message>, Receiver<Message>) = channel(100);
+    let processing_handle = tokio::spawn(process_message_queue(
+        rx,
+        ping_pong.clone(),
+        orderbooks_rwl.clone(),
+        notify.clone(),
+        tick_size,
+        dataframe_rwl.clone(),
+    ));
+
+    while let Some(result) = receiver.next().await {
+        match result {
+            Ok(message) => {
+                if let Err(e) = tx.send(message).await {
+                    warn!("Error sending message to queue: {:?}", e);
                 }
             }
-        })
-        .await;
+            Err(e) => {
+                warn!("Error receiving message: {:?}", e);
+            }
+        }
+    }
+
+    if let Err(e) = processing_handle.await {
+        warn!("Error processing message queue: {:?}", e);
+    }
+}
+
+async fn process_message_queue(
+    mut receiver: Receiver<Message>,
+    ping_pong: Arc<Notify>,
+    orderbooks_rwl: OrderBooksRWL,
+    notify: Arc<Notify>,
+    tick_size: Decimal,
+    dataframe_rwl: Dfrwl,
+) {
+    while let Some(message) = receiver.recv().await {
+        match message {
+            Message::Text(text_message) => {
+                debug!("Received message: {}", text_message);
+                match serde_json::from_str::<Map<String, Value>>(&text_message) {
+                    Ok(unrouted_message) => match unrouted_message.contains_key("data") {
+                        true => match unrouted_message["data"]["e"].as_str().unwrap() {
+                            "depthUpdate" => {
+                                handle_depth_update_message(
+                                    unrouted_message["data"].clone(),
+                                    orderbooks_rwl.clone(),
+                                )
+                                .await;
+                            }
+                            "trade" => {
+                                handle_trades(
+                                    unrouted_message["data"].clone(),
+                                    orderbooks_rwl.clone(),
+                                    notify.clone(),
+                                    tick_size,
+                                    dataframe_rwl.clone(),
+                                )
+                                .await;
+                            }
+                            "bookTicker" => {
+                                handle_book_ticker(unrouted_message["data"].clone()).await;
+                            }
+                            _ => {
+                                debug!("Unrecognized message: {:?}", unrouted_message);
+                            }
+                        },
+                        false => {
+                            if unrouted_message.keys().len() == 2
+                                && unrouted_message.contains_key("result")
+                                && unrouted_message["result"].is_null()
+                            {
+                                debug!(
+                                    "Successfully subscribed to request id {}",
+                                    unrouted_message["id"]
+                                );
+                            } else {
+                                warn!("Unrecognized message: {:?}", unrouted_message);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        error!("Error parsing message: {:?}", e);
+                    }
+                }
+            }
+            Message::Binary(_) => {
+                warn!("Binary message received");
+            }
+            Message::Ping(_) => {
+                debug!("Received ping");
+                ping_pong.notify_one();
+            }
+            Message::Pong(_) => {}
+            Message::Close(cf) => {
+                warn!("Close received {cf:?}");
+            }
+            Message::Frame(_) => {
+                warn!("Frame received");
+            }
+        }
+    }
 }
 
 async fn process_outgoing_message(
