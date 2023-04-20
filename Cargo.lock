@@ -566,6 +566,7 @@ dependencies = [
 [[package]]
 name = "gbdt"
 version = "0.1.1"
+source = "git+https://github.com/numberjuani/gbdt-rs#001c1e7464398abc9b8e0b634d644d1aedfaf99e"
 dependencies = [
  "cfg-if",
  "rand",
