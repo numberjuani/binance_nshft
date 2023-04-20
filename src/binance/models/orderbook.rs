@@ -4,7 +4,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use log::debug;
 use log::warn;
-use rust_decimal::prelude::ToPrimitive;
+
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{serde_as, TimestampMilliSeconds};
@@ -37,7 +37,7 @@ impl OrderBook {
     pub fn is_empty(&self) -> bool {
         self.bids.is_empty() && self.asks.is_empty()
     }
-    pub fn to_features(&self, tick_size: Decimal) -> Option<Vec<f32>> {
+    pub fn to_features(&self, tick_size: Decimal) -> Option<BookFeatures> {
         let bid_total = self.bids.par_iter().map(|b| b.size).sum::<Decimal>();
         let ask_total = self.asks.par_iter().map(|a| a.size).sum::<Decimal>();
         if bid_total == Decimal::ZERO || ask_total == Decimal::ZERO {
@@ -71,15 +71,15 @@ impl OrderBook {
             .par_iter()
             .map(|a| a.price * a.size)
             .sum::<Decimal>();
-        Some(vec![
-            bid_total.to_f32().unwrap(),
-            num_ticks_from_best_bid.to_f32().unwrap(),
-            ask_total.to_f32().unwrap(),
-            num_ticks_from_best_ask.to_f32().unwrap(),
-            bids_asks_ratio.to_f32().unwrap(),
-            bid_notional.to_f32().unwrap(),
-            ask_notional.to_f32().unwrap(),
-        ])
+        Some(BookFeatures {
+            bid_total,
+            ask_total,
+            num_ticks_from_best_bid,
+            num_ticks_from_best_ask,
+            bids_asks_ratio,
+            bid_notional,
+            ask_notional,
+        })
     }
     pub fn new_from_update(update: OrderbookMessage) -> Self {
         Self {
@@ -100,20 +100,22 @@ impl OrderBook {
             warn!("Orderbook update for {} not orderly", update.symbol);
             self.is_valid = false;
         }
-    
-        let update_bids_map: HashMap<_, _> = update.bids.into_iter().map(|b| (b.price, b.size)).collect();
-        let update_asks_map: HashMap<_, _> = update.asks.into_iter().map(|a| (a.price, a.size)).collect();
-    
+
+        let update_bids_map: HashMap<_, _> =
+            update.bids.into_iter().map(|b| (b.price, b.size)).collect();
+        let update_asks_map: HashMap<_, _> =
+            update.asks.into_iter().map(|a| (a.price, a.size)).collect();
+
         // Process bids and asks in parallel
         rayon::join(
             || update_orders(&mut self.bids, &update_bids_map),
             || update_orders(&mut self.asks, &update_asks_map),
         );
-    
+
         self.time = update.time;
         self.last_update_id = update.last_update_id;
         self.first_update_id = update.first_update_id;
-    
+
         self.bids.par_sort_unstable_by_key(|b| -b.price);
         self.asks.par_sort_unstable_by_key(|a| a.price);
     }
@@ -172,7 +174,6 @@ pub struct UpdateCSVFormat {
     pub quantity: Decimal,
 }
 
-
 fn update_orders(orders: &mut Vec<PriceSize>, updates: &HashMap<Decimal, Decimal>) {
     orders.par_iter_mut().for_each(|o| {
         if let Some(size) = updates.get(&o.price) {
@@ -191,4 +192,14 @@ fn update_orders(orders: &mut Vec<PriceSize>, updates: &HashMap<Decimal, Decimal
 
     orders.extend(new_orders);
     orders.retain(|o| !o.size.is_zero());
+}
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BookFeatures {
+    pub bid_total: Decimal,
+    pub num_ticks_from_best_bid: Decimal,
+    pub ask_total: Decimal,
+    pub num_ticks_from_best_ask: Decimal,
+    pub bids_asks_ratio: Decimal,
+    pub bid_notional: Decimal,
+    pub ask_notional: Decimal,
 }

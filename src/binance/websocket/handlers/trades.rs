@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use log::error;
+use log::{debug, error};
 use rust_decimal::Decimal;
 use serde_json::Value;
 use tokio::sync::Notify;
 
 use crate::{
     binance::models::{orderbook::OrderBooksRWL, trades::Trade},
-    model::data_handling::Dfrwl,
+    model::data_handling::{Dfrwl, Observation},
     ROLLING_WINDOW,
 };
 
@@ -20,18 +20,18 @@ pub async fn handle_trades(
 ) {
     match serde_json::from_value::<Trade>(message) {
         Ok(trade) => {
-            if let Some(mut book_features) =
-                orderbooks_rwl.read().await.clone().to_features(tick_size)
+            if let Some(book_features) = orderbooks_rwl.read().await.clone().to_features(tick_size)
             {
-                let mut row = Vec::new();
-                row.append(&mut trade.to_features());
-                row.append(&mut book_features);
                 let mut write = dataframe_rwl.write().await;
-                write.data.push(row);
+                let obs = Observation::from_trade_and_book(trade.to_features(), book_features);
+                write.data.push(obs);
                 write.calculate_rolling_features();
-                if write.data.len() > 2 * ROLLING_WINDOW {
+                //info the last observation
+                if write.data.len() % (2 * ROLLING_WINDOW) == 0 {
                     notify.notify_one();
                 }
+            } else {
+                debug!("No book features");
             }
         }
         Err(e) => {

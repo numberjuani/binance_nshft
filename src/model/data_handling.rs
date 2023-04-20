@@ -1,31 +1,95 @@
-/*
-0: timestamp
-1: price
-2: net qty
-3: notional
-4: bid_total.
-5: num_ticks_from_best_bid
-6: ask_total
-7: num_ticks_from_best_ask
-8: bids_asks_ratio
-9: bid_notional
-10: ask_notional
-rolling
-11: rolling_qty,
-12: mean_qty,
-13: qty_std,
-14: mean_price,
-15: price_std,
-16: book_ratio_rolling_mean,
-17 : rolling_qty_abs,
-18: target
- */
-
-use polars::prelude::*;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use rust_decimal::{prelude::ToPrimitive, Decimal, MathematicalOps};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+use crate::{
+    binance::models::{orderbook::BookFeatures, trades::TradeFeatures},
+    ROLLING_WINDOW,
+};
 pub type Dfrwl = Arc<RwLock<FeatureDataFrame>>;
+#[derive(Debug, Clone)]
+pub struct Observation {
+    pub timestamp: i64,
+    pub price: Decimal,
+    pub net_qty: Decimal,
+    pub notional: Decimal,
+    pub bid_total: Decimal,
+    pub num_ticks_from_best_bid: Decimal,
+    pub ask_total: Decimal,
+    pub num_ticks_from_best_ask: Decimal,
+    pub bids_asks_ratio: Decimal,
+    pub bid_notional: Decimal,
+    pub ask_notional: Decimal,
+    pub rolling_qty: Option<Decimal>,
+    pub mean_qty: Option<Decimal>,
+    pub qty_std: Option<Decimal>,
+    pub mean_price: Option<Decimal>,
+    pub price_std: Option<Decimal>,
+    pub book_ratio_rolling_mean: Option<Decimal>,
+    pub rolling_qty_abs: Option<Decimal>,
+    pub target: Option<Decimal>,
+}
+impl Observation {
+    pub fn from_trade_and_book(trade_features: TradeFeatures, book_features: BookFeatures) -> Self {
+        Self {
+            timestamp: trade_features.timestamp,
+            price: trade_features.price,
+            net_qty: trade_features.net_qty,
+            notional: trade_features.notional,
+            bid_total: book_features.bid_total,
+            num_ticks_from_best_bid: book_features.num_ticks_from_best_bid,
+            ask_total: book_features.ask_total,
+            num_ticks_from_best_ask: book_features.num_ticks_from_best_ask,
+            bids_asks_ratio: book_features.bids_asks_ratio,
+            bid_notional: book_features.bid_notional,
+            ask_notional: book_features.ask_notional,
+            rolling_qty: None,
+            mean_qty: None,
+            qty_std: None,
+            mean_price: None,
+            price_std: None,
+            book_ratio_rolling_mean: None,
+            rolling_qty_abs: None,
+            target: None,
+        }
+    }
+    ///Returns true if the `Observation` has rolling features.
+    pub fn has_rolling_features(&self) -> bool {
+        self.rolling_qty.is_some()
+            && self.mean_qty.is_some()
+            && self.qty_std.is_some()
+            && self.mean_price.is_some()
+            && self.price_std.is_some()
+            && self.book_ratio_rolling_mean.is_some()
+            && self.rolling_qty_abs.is_some()
+    }
+    pub fn has_target(&self) -> bool {
+        self.target.is_some()
+    }
+    pub fn to_training_data(&self) -> [f32; 18] {
+        [
+            self.timestamp as f32,
+            self.price.to_f32().unwrap(),
+            self.net_qty.to_f32().unwrap(),
+            self.notional.to_f32().unwrap(),
+            self.bid_total.to_f32().unwrap(),
+            self.num_ticks_from_best_bid.to_f32().unwrap(),
+            self.ask_total.to_f32().unwrap(),
+            self.num_ticks_from_best_ask.to_f32().unwrap(),
+            self.bids_asks_ratio.to_f32().unwrap(),
+            self.bid_notional.to_f32().unwrap(),
+            self.ask_notional.to_f32().unwrap(),
+            self.rolling_qty.unwrap().to_f32().unwrap(),
+            self.mean_qty.unwrap().to_f32().unwrap(),
+            self.qty_std.unwrap().to_f32().unwrap(),
+            self.mean_price.unwrap().to_f32().unwrap(),
+            self.price_std.unwrap().to_f32().unwrap(),
+            self.book_ratio_rolling_mean.unwrap().to_f32().unwrap(),
+            self.rolling_qty_abs.unwrap().to_f32().unwrap(),
+        ]
+    }
+}
 
 pub fn new_dataframe_rwl() -> Dfrwl {
     let df = FeatureDataFrame::new_empty();
@@ -34,134 +98,98 @@ pub fn new_dataframe_rwl() -> Dfrwl {
 
 #[derive(Debug, Clone)]
 pub struct FeatureDataFrame {
-    pub data: Vec<Vec<f32>>,
-    pub rolling_window: usize,
+    pub data: Vec<Observation>,
 }
 impl FeatureDataFrame {
     pub fn new_empty() -> Self {
         Self {
             data: Vec::with_capacity(10000000),
-            rolling_window: 0,
         }
     }
     pub fn calculate_rolling_features(&mut self) {
-        if self.data.is_empty() || self.data.len() < self.rolling_window {
+        if self.data.is_empty() || self.data.len() < ROLLING_WINDOW + 2 {
             return;
         };
-        for i in self.data.len() - 1..self.rolling_window {
-            if self.data[i].len() >= 11 {
+        let max_index = self.data.len() - 1;
+        for i in (ROLLING_WINDOW..max_index).rev() {
+            if self.data[i].has_rolling_features() {
                 continue;
             }
-            let net_qty_rolling = self.data[i - self.rolling_window..i]
+            let net_qty_rolling = self.data[i - ROLLING_WINDOW..i]
                 .par_iter()
-                .map(|x| x[3])
+                .map(|x| x.notional)
                 .collect::<Vec<_>>();
-            let rolling_qty = net_qty_rolling.par_iter().sum::<f32>();
-            let mean_qty = rolling_qty / self.rolling_window as f32;
-            let qty_std = f32::sqrt(
-                net_qty_rolling
+            let rolling_qty = net_qty_rolling.par_iter().sum::<Decimal>();
+            let mean_qty = rolling_qty / Decimal::from(ROLLING_WINDOW);
+            let qty_std = Decimal::sqrt(
+                &(net_qty_rolling
                     .par_iter()
                     .map(|x| (x - mean_qty).powi(2))
-                    .sum::<f32>()
-                    / self.rolling_window as f32,
+                    .sum::<Decimal>()
+                    / Decimal::from(ROLLING_WINDOW)),
             );
-            let last_price_rolling = self.data[i - self.rolling_window..i]
+            let last_price_rolling = self.data[i - ROLLING_WINDOW..i]
                 .par_iter()
-                .map(|x| x[1])
+                .map(|x| x.price)
                 .collect::<Vec<_>>();
             let mean_price =
-                last_price_rolling.par_iter().sum::<f32>() / self.rolling_window as f32;
-            let price_std = f32::sqrt(
-                last_price_rolling
+                last_price_rolling.par_iter().sum::<Decimal>() / Decimal::from(ROLLING_WINDOW);
+            let price_std = Decimal::sqrt(
+                &(last_price_rolling
                     .par_iter()
                     .map(|x| (x - mean_price).powi(2))
-                    .sum::<f32>()
-                    / self.rolling_window as f32,
+                    .sum::<Decimal>()
+                    / Decimal::from(ROLLING_WINDOW)),
             );
-            let book_ratio_rolling_mean = self.data[i - self.rolling_window..i]
+            let book_ratio_rolling_mean = self.data[i - ROLLING_WINDOW..i]
                 .par_iter()
-                .map(|x| x[8])
+                .map(|x| x.bids_asks_ratio)
                 .collect::<Vec<_>>()
                 .par_iter()
-                .sum::<f32>()
-                / self.rolling_window as f32;
-            let rolling_qty_abs = self.data[i - self.rolling_window..i]
+                .sum::<Decimal>()
+                / Decimal::from(ROLLING_WINDOW);
+            let rolling_qty_abs = self.data[i - ROLLING_WINDOW..i]
                 .par_iter()
-                .map(|x| x[3].abs())
+                .map(|x| x.notional.abs())
                 .collect::<Vec<_>>()
                 .par_iter()
-                .sum::<f32>();
-            self.data[i].append(&mut vec![
-                rolling_qty,
-                mean_qty,
-                qty_std,
-                mean_price,
-                price_std,
-                book_ratio_rolling_mean,
-                rolling_qty_abs,
-            ]);
+                .sum::<Decimal>();
+            self.data[i].rolling_qty = Some(rolling_qty);
+            self.data[i].mean_qty = Some(mean_qty);
+            self.data[i].qty_std = qty_std;
+            self.data[i].mean_price = Some(mean_price);
+            self.data[i].price_std = price_std;
+            self.data[i].book_ratio_rolling_mean = Some(book_ratio_rolling_mean);
+            self.data[i].rolling_qty_abs = Some(rolling_qty_abs);
         }
-        self.drop_na();
+        //self.drop_na_without_target();
     }
-    pub fn add_target_value(&mut self, tick_size: f32) {
-        if self.data.is_empty() || self.data.len() < self.rolling_window {
+    pub fn add_target_value(&mut self, tick_size: Decimal) {
+        if self.data.is_empty() || self.data.len() < ROLLING_WINDOW {
             return;
         };
-        for i in self.rolling_window..self.data.len() - 1 {
-            let start_of_period = &self.data[i - self.rolling_window][1];
-            let price_rp = self.data[i - self.rolling_window..i]
+        for i in ROLLING_WINDOW..self.data.len() - 1 {
+            let start_of_period = &self.data[i - ROLLING_WINDOW].price;
+            let price_rp = self.data[i - ROLLING_WINDOW..i]
                 .par_iter()
-                .map(|x| x[1])
+                .map(|x| x.price)
                 .collect::<Vec<_>>();
-            let highest_price = price_rp
-                .par_iter()
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
-                .unwrap();
-            let lowest_price = price_rp
-                .par_iter()
-                .min_by(|a, b| a.partial_cmp(b).unwrap())
-                .unwrap();
+            let highest_price = price_rp.par_iter().max().unwrap();
+            let lowest_price = price_rp.par_iter().min().unwrap();
             let distance_to_high = (highest_price - start_of_period) / tick_size;
             let distance_to_low = (start_of_period - lowest_price) / tick_size;
             let diff = distance_to_high - distance_to_low;
-            self.data[i - self.rolling_window].push(diff);
+            self.data[i - ROLLING_WINDOW].target = Some(diff);
         }
-        self.drop_na();
+        self.drop_na_with_target();
     }
-    pub fn drop_na(&mut self) {
-        //get the max length of the rows
-        let max_len = self.data.par_iter().map(|x| x.len()).max().unwrap();
-        //drop the rows that are not the max length
-        self.data.retain(|x| x.len() == max_len);
+    pub fn drop_na_without_target(&mut self) {
+        //drop all rows that have a None value
+        self.data.retain(|x| x.has_rolling_features());
     }
-    pub fn shape(&self) -> (usize, usize) {
-        let rows = self.data.len();
-        let cols = self.data.first().unwrap_or(&Vec::new()).len();
-        (rows, cols)
+    pub fn drop_na_with_target(&mut self) {
+        //drop all rows that have a None value
+        self.data
+            .retain(|x| x.has_rolling_features() && x.has_target());
     }
-    pub fn save_to_parquet(self, file_name: &str) {
-        let mut dataframe = DataFrame::empty();
-        for (index, _) in self.data[0].iter().enumerate() {
-            let series = Series::new(
-                &format!("col_{index}"),
-                self.data.par_iter().map(|x| x[index]).collect::<Vec<_>>(),
-            );
-            dataframe.with_column(series).unwrap();
-        }
-        let mut file = std::fs::File::create(file_name).unwrap();
-        ParquetWriter::new(&mut file)
-            .with_compression(ParquetCompression::Snappy)
-            .finish(&mut dataframe)
-            .unwrap();
-    }
-    // pub fn read_from_parquet(file_name: &str,rolling_window:usize) -> Result<Self, Box<dyn std::error::Error>> {
-    //     let mut file = std::fs::File::open(file_name)?;
-    //     let df = ParquetReader::new(&mut file).finish()?;
-    //     let mut out = Vec::new();
-    //     for row in 0..df.height() {
-    //         let row = df.get_row(row).unwrap();
-    //         out.push(row.0.into_iter().map(|x| x.try_extract().unwrap()).collect::<Vec<f32>>());
-    //     }
-    //     Ok(Self { data: out ,rolling_window})
-    // }
 }

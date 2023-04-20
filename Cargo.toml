@@ -21,7 +21,7 @@ chrono = { version = "0.4.24", features = ["serde"] }
 serde_with = { version = "2.3.2", features = ["chrono"] }
 futures = "0.3.28"
 rayon = "1.7.0"
-rust_decimal = { version = "1.29.1", features = ["serde-with-str"] }
-gbdt = { package = "gbdt", git = "https://github.com/numberjuani/gbdt-rs" }
-polars = {version="0.28.0",features=["parquet"]}
+rust_decimal = { version = "1.29.1", features = ["serde-with-str","maths"] }
+gbdt = { package = "gbdt", path = "/Users/juanmarquez/Documents/gbdt-rs" }
+#polars = {version="0.28.0",features=["parquet"]}
 

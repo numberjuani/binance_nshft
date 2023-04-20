@@ -14,7 +14,7 @@ use log::{debug, error, warn};
 use rust_decimal::Decimal;
 use serde_json::{Map, Value};
 use std::sync::Arc;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+
 use tokio::{net::TcpStream, sync::Notify};
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -105,106 +105,96 @@ async fn process_incoming_message(
     tick_size: Decimal,
     dataframe_rwl: Dfrwl,
 ) {
-    let (tx, rx): (Sender<Message>, Receiver<Message>) = channel(100);
-    let processing_handle = tokio::spawn(process_message_queue(
-        rx,
-        ping_pong.clone(),
-        orderbooks_rwl.clone(),
-        notify.clone(),
-        tick_size,
-        dataframe_rwl.clone(),
-    ));
-
     while let Some(result) = receiver.next().await {
         match result {
             Ok(message) => {
-                if let Err(e) = tx.send(message).await {
-                    warn!("Error sending message to queue: {:?}", e);
-                }
+                process_message(
+                    message,
+                    ping_pong.clone(),
+                    orderbooks_rwl.clone(),
+                    notify.clone(),
+                    tick_size,
+                    dataframe_rwl.clone(),
+                )
+                .await;
             }
             Err(e) => {
                 warn!("Error receiving message: {:?}", e);
             }
         }
     }
-
-    if let Err(e) = processing_handle.await {
-        warn!("Error processing message queue: {:?}", e);
-    }
 }
 
-async fn process_message_queue(
-    mut receiver: Receiver<Message>,
+async fn process_message(
+    message: Message,
     ping_pong: Arc<Notify>,
     orderbooks_rwl: OrderBooksRWL,
     notify: Arc<Notify>,
     tick_size: Decimal,
     dataframe_rwl: Dfrwl,
 ) {
-    while let Some(message) = receiver.recv().await {
-        match message {
-            Message::Text(text_message) => {
-                debug!("Received message: {}", text_message);
-                match serde_json::from_str::<Map<String, Value>>(&text_message) {
-                    Ok(unrouted_message) => match unrouted_message.contains_key("data") {
-                        true => match unrouted_message["data"]["e"].as_str().unwrap() {
-                            "depthUpdate" => {
-                                handle_depth_update_message(
-                                    unrouted_message["data"].clone(),
-                                    orderbooks_rwl.clone(),
-                                )
-                                .await;
-                            }
-                            "trade" => {
-                                handle_trades(
-                                    unrouted_message["data"].clone(),
-                                    orderbooks_rwl.clone(),
-                                    notify.clone(),
-                                    tick_size,
-                                    dataframe_rwl.clone(),
-                                )
-                                .await;
-                            }
-                            "bookTicker" => {
-                                handle_book_ticker(unrouted_message["data"].clone()).await;
-                            }
-                            _ => {
-                                debug!("Unrecognized message: {:?}", unrouted_message);
-                            }
-                        },
-                        false => {
-                            if unrouted_message.keys().len() == 2
-                                && unrouted_message.contains_key("result")
-                                && unrouted_message["result"].is_null()
-                            {
-                                debug!(
-                                    "Successfully subscribed to request id {}",
-                                    unrouted_message["id"]
-                                );
-                            } else {
-                                warn!("Unrecognized message: {:?}", unrouted_message);
-                            }
+    match message {
+        Message::Text(text_message) => {
+            //debug!("Received message: {}", text_message);
+            match serde_json::from_str::<Map<String, Value>>(&text_message) {
+                Ok(unrouted_message) => match unrouted_message.contains_key("data") {
+                    true => match unrouted_message["data"]["e"].as_str().unwrap() {
+                        "depthUpdate" => {
+                            handle_depth_update_message(
+                                unrouted_message["data"].clone(),
+                                orderbooks_rwl.clone(),
+                            )
+                            .await;
+                        }
+                        "trade" => {
+                            handle_trades(
+                                unrouted_message["data"].clone(),
+                                orderbooks_rwl.clone(),
+                                notify.clone(),
+                                tick_size,
+                                dataframe_rwl.clone(),
+                            )
+                            .await;
+                        }
+                        "bookTicker" => {
+                            handle_book_ticker(unrouted_message["data"].clone()).await;
+                        }
+                        _ => {
+                            debug!("Unrecognized message: {:?}", unrouted_message);
                         }
                     },
-                    Err(e) => {
-                        error!("Error parsing message: {:?}", e);
+                    false => {
+                        if unrouted_message.keys().len() == 2
+                            && unrouted_message.contains_key("result")
+                            && unrouted_message["result"].is_null()
+                        {
+                            debug!(
+                                "Successfully subscribed to request id {}",
+                                unrouted_message["id"]
+                            );
+                        } else {
+                            warn!("Unrecognized message: {:?}", unrouted_message);
+                        }
                     }
+                },
+                Err(e) => {
+                    error!("Error parsing message: {:?}", e);
                 }
             }
-            Message::Binary(_) => {
-                warn!("Binary message received");
-            }
-            Message::Ping(_) => {
-                debug!("Received ping");
-                ping_pong.notify_one();
-            }
-            Message::Pong(_) => {}
-            Message::Close(cf) => {
-                warn!("Close received {cf:?}");
-            }
-            Message::Frame(_) => {
-                warn!("Frame received");
-            }
+        }
+        Message::Binary(_) => {
+            warn!("Binary message received");
+        }
+        Message::Ping(_) => {
+            debug!("Received ping");
+            ping_pong.notify_one();
+        }
+        Message::Pong(_) => {}
+        Message::Close(cf) => {
+            warn!("Close received {cf:?}");
+        }
+        Message::Frame(_) => {
+            warn!("Frame received");
         }
     }
 }

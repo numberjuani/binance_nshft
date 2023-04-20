@@ -1,7 +1,7 @@
-use std::borrow::Cow;
 use chrono::DateTime;
 use chrono::Utc;
-use rust_decimal::prelude::ToPrimitive;
+use std::borrow::Cow;
+
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde::Serialize;
@@ -37,19 +37,17 @@ pub struct Trade<'a> {
 }
 
 impl<'a> Trade<'a> {
-    pub fn to_features(&self) -> Vec<f32> {
-        let net_qty = if self.buyer_is_the_market_maker {
-            -self.quantity.to_f32().unwrap()
-        } else {
-            self.quantity.to_f32().unwrap()
-        };
-        let price_f32 = self.price.to_f32().unwrap();
-        vec![
-            self.trade_time.timestamp_millis() as f32,
-            price_f32,
-            net_qty,
-            price_f32 * net_qty,
-        ]
+    pub fn to_features(&self) -> TradeFeatures {
+        TradeFeatures {
+            timestamp: self.trade_time.timestamp_millis(),
+            price: self.price,
+            net_qty: if self.buyer_is_the_market_maker {
+                -self.quantity
+            } else {
+                self.quantity
+            },
+            notional: self.price * self.quantity,
+        }
     }
     // pub fn miliseconds_since_event(&self) -> i64 {
     //     Utc::now().timestamp_millis() - self.event_time.timestamp_millis()
@@ -62,3 +60,10 @@ impl<'a> Trade<'a> {
 2: net qty
 3: notional
  */
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TradeFeatures {
+    pub timestamp: i64,
+    pub price: Decimal,
+    pub net_qty: Decimal,
+    pub notional: Decimal,
+}
