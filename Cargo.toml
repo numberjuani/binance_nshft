@@ -8,7 +8,7 @@ edition = "2021"
 opt-level = 3
 lto = true
 [dependencies]
-tokio = {version ="1.35.1", features = ["macros","sync","time","rt-multi-thread","signal"]}
+tokio = {version ="1", features = ["macros","sync","time","rt-multi-thread","signal"]}
 tokio-tungstenite = {version = "0.21.0", features = ["rustls-tls-native-roots"]}
 log = "0.4.20"
 reqwest = {version = "0.11.23", features = ["json"] }
