@@ -8,20 +8,20 @@ edition = "2021"
 opt-level = 3
 lto = true
 [dependencies]
-tokio = {version ="1.27.0", features = ["macros","sync","time","rt-multi-thread","signal"]}
-tokio-tungstenite = {version = "0.18.0", features = ["rustls-tls-native-roots"]}
-log = "0.4.17"
-reqwest = {version = "0.11.16", features = ["json"] }
-serde = {version = "1.0.160", features = ["derive"] }
+tokio = {version ="1.35.1", features = ["macros","sync","time","rt-multi-thread","signal"]}
+tokio-tungstenite = {version = "0.21.0", features = ["rustls-tls-native-roots"]}
+log = "0.4.20"
+reqwest = {version = "0.11.23", features = ["json"] }
+serde = {version = "1.0.193", features = ["derive"] }
 log4rs = "1.2.0"
-url = "2.3.1"
-futures-util = "0.3.28"
-serde_json = "1.0.96"
-chrono = { version = "0.4.24", features = ["serde"] }
-serde_with = { version = "2.3.2", features = ["chrono"] }
-futures = "0.3.28"
-rayon = "1.7.0"
-rust_decimal = { version = "1.29.1", features = ["serde-with-str","maths"] }
+url = "2.5.0"
+futures-util = "0.3.30"
+serde_json = "1.0.108"
+chrono = { version = "0.4.31", features = ["serde"] }
+serde_with = { version = "3.4.0", features = ["chrono"] }
+futures = "0.3.30"
+rayon = "1.8.0"
+rust_decimal = { version = "1.33.1", features = ["serde-with-str","maths"] }
 gbdt = { package = "gbdt", git = "https://github.com/numberjuani/gbdt-rs" }
 #polars = {version="0.28.0",features=["parquet"]}
 

@@ -102,9 +102,9 @@ impl OrderBook {
         }
 
         let update_bids_map: HashMap<_, _> =
-            update.bids.into_iter().map(|b| (b.price, b.size)).collect();
+            update.bids.into_par_iter().map(|b| (b.price, b.size)).collect();
         let update_asks_map: HashMap<_, _> =
-            update.asks.into_iter().map(|a| (a.price, a.size)).collect();
+            update.asks.into_par_iter().map(|a| (a.price, a.size)).collect();
 
         // Process bids and asks in parallel
         rayon::join(
@@ -175,9 +175,9 @@ pub struct UpdateCSVFormat {
 }
 
 fn update_orders(orders: &mut Vec<PriceSize>, updates: &HashMap<Decimal, Decimal>) {
-    orders.par_iter_mut().for_each(|o| {
-        if let Some(size) = updates.get(&o.price) {
-            o.size = *size;
+    orders.par_iter_mut().for_each(|order| {
+        if let Some(size) = updates.get(&order.price) {
+            order.size = *size;
         }
     });
 
